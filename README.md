@@ -24,5 +24,5 @@ This is a backup of a personal ongoing project.
 
 ### Historical Documents
 
-* [Prelim presentation](https://drive.google.com/open?id=1H_-yqnGvDuv74KIQpPi57qoz9K0AvfkZ)
-* [Prelim proposal](https://drive.google.com/open?id=1TeBCnF7ULV4xcPxTzORrYi_CqtT_p6WM)
+* [Prelim presentation](https://drive.google.com/open?id=remove1H_-yqnGvDuv74KIQpPi57qoz9K0AvfkZ)
+* [Prelim proposal](https://drive.google.com/open?id=remove1TeBCnF7ULV4xcPxTzORrYi_CqtT_p6WM)
