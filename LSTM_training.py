@@ -138,13 +138,17 @@ class LSTM_SpeedPrediction_database_output_multi_sensor(Dataset):
         data_sub = self.data[:idx]
         sameday_in_history = data_sub.index[data_sub['dayofweek'] == dayofweek].tolist()
         
-        Traffic_history = np.full((self.look_back,)+self.Traffic.shape[1:], np.nan)
+#         Traffic_history = np.full((self.look_back,)+self.Traffic.shape[1:], np.nan)
+        
+        Traffic_history = [self.Traffic[idx,:,:,:]+np.random.randn(15,1440,3) for _ in range(self.look_back)]
+        Traffic_history = np.stack(Traffic_history,0)
+        
 #         print(len(sameday_in_history))
         sameday_in_near_history = sameday_in_history[-self.look_back:]
 #         print(len(sameday_in_near_history))
         
         for i in range(len(sameday_in_near_history)):
-            Traffic_history[i] = self.Traffic[sameday_in_near_history[i]]
+            Traffic_history[self.look_back-len(sameday_in_near_history)+i] = self.Traffic[sameday_in_near_history[i]]
         
         sample = {'traffic': torch.Tensor(Traffic_today),'weather': torch.Tensor(Weather_today), 'history': torch.Tensor(Traffic_history), 'label': torch.Tensor(Traffic_output)} # 
 
@@ -286,14 +290,23 @@ class LSTM_Short_Term_Speed_Pred_Net(nn.Module):
 #         print('weather: ',weather.shape)
 #         print('history: ',history.shape)
 #         print('label: ',label.shape)
+#         print()
+#         print(np.sum(np.isnan(np.array(traffic))))
+#         print(np.sum(np.isnan(np.array(weather))))
+#         print(np.sum(np.isnan(np.array(history))))
+        
         '''normalize'''
-        label = (label - self.Traffic_min[0])/(self.Traffic_max[0]-self.Traffic_min[0])
+#         label = (label - self.Traffic_min[0])/(self.Traffic_max[0]-self.Traffic_min[0])
         for i in range(traffic.shape[-1]):
             traffic[:,:,:,i] = (traffic[:,:,:,i]-self.Traffic_min[i])/(self.Traffic_max[i]-self.Traffic_min[i])
             history[:,:,:,:,i] = (history[:,:,:,:,i]-self.Traffic_min[i])/(self.Traffic_max[i]-self.Traffic_min[i])
         for i in range(weather.shape[-1]):
             weather[:,:,:,i] = (weather[:,:,:,i]-self.Weather_min[i])/(self.Weather_max[i]-self.Weather_min[i])
         
+#         print()
+#         print(np.sum(np.isnan(np.array(traffic))))
+#         print(np.sum(np.isnan(np.array(weather))))
+#         print(np.sum(np.isnan(np.array(history))))
         '''re-arrange inputs'''
         input_today = traffic[:,:,:,0:1]
         
@@ -314,6 +327,10 @@ class LSTM_Short_Term_Speed_Pred_Net(nn.Module):
             input_history = Variable(input_history)
             label = Variable(label)
         
+#         print()
+#         print(np.sum(np.isnan(np.array(input_today.data))))
+#         print(np.sum(np.isnan(np.array(input_history.data))))
+        
         '''feedforward'''
         
         outputs = []
@@ -321,16 +338,18 @@ class LSTM_Short_Term_Speed_Pred_Net(nn.Module):
         cell_state_today = self.init_hidden(input_sample)
         hidden_state_history = self.init_hidden(input_sample)
         cell_state_history = self.init_hidden(input_sample)
-        
+#         print(input_today.data.shape[2])
         for i in range(input_today.data.shape[2]):
             
             input_t = input_today[:,:,i:i+1,:]
             input_t = input_t.permute(0,2,1,3)
             
             input_t_history = []
+#             print(input_history.shape[1])
             for k in range(input_history.shape[1]):
                 if not np.isnan(np.array(input_history[0,k,0,0,0].data))[0]:
-                    input_t_history.append(input_history[:,k,:,i:i+1,:].permute(0,2,1,3))
+                    input_t_history.append(input_history[:,k,:,i+1:i+2,:].permute(0,2,1,3))
+#             print(len(input_t_history))
 
             if self.input_feature == 'cnn':
                 input_t = self.CNN_feature_extract(input_t)
@@ -341,8 +360,8 @@ class LSTM_Short_Term_Speed_Pred_Net(nn.Module):
             else:
                 hidden_state_today, cell_state_today, hidden_state_output = self.LSTM_update(input_t,hidden_state_today,cell_state_today)
             
-            output = self.linear_out(hidden_state_output)
-
+            output = nn.functional.sigmoid(self.linear_out(hidden_state_output))
+            output = output*(self.Traffic_max[0]-self.Traffic_min[0])+self.Traffic_min[0] 
             outputs += [output]
         outputs = torch.stack(outputs, 2)
 
@@ -373,6 +392,8 @@ def train_LSTM_perVehiclePrediction_Net(model,dataloaders, criterion, optimizer,
 #     timeSince(since)
     best_model_wts = model.state_dict()
     best_loss = 100000
+    losses = {'train':[],'val':[]}
+    
 
     for epoch in range(num_epochs):
         print('Epoch {}/{}'.format(epoch, num_epochs - 1))
@@ -416,6 +437,8 @@ def train_LSTM_perVehiclePrediction_Net(model,dataloaders, criterion, optimizer,
 
             epoch_loss = running_loss / dataset_sizes[phase]
 
+            losses[phase].append(epoch_loss)
+
             print('{} Loss: {:.4f} total elapsed time: {}'.format(phase, epoch_loss, timeSince(since)))
 
             # deep copy the model
@@ -430,6 +453,7 @@ def train_LSTM_perVehiclePrediction_Net(model,dataloaders, criterion, optimizer,
     print('Training complete in {}'.format(timeSince(since)))
     print('Best val loss: {:4f}'.format(best_loss))
     
+    pickle.dump( losses, open( 'loss_log_'+str(time.time())+'_.p', "wb" ) )
     # load best model weights
     model.load_state_dict(best_model_wts)
     torch.save(model, 'Model_with_Best_LSTM_Weights')
@@ -439,4 +463,4 @@ def train_LSTM_perVehiclePrediction_Net(model,dataloaders, criterion, optimizer,
 
 
 if __name__ == '__main__':
-  model_ft = train_LSTM_perVehiclePrediction_Net(model,dataloaders, criterion, optimizer, dataset_sizes, num_epochs=2000)
+  model_ft = train_LSTM_perVehiclePrediction_Net(model,dataloaders, criterion, optimizer, dataset_sizes, num_epochs=10000)
